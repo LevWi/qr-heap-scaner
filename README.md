@@ -1,0 +1,1 @@
+# qr-heap-scaner
