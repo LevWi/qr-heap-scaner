@@ -15,15 +15,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageAnalysis.COORDINATE_SYSTEM_ORIGINAL
+import androidx.camera.core.ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.mlkit.vision.MlKitAnalyzer
 import androidx.concurrent.futures.await
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import com.google.mlkit.vision.barcode.BarcodeScannerOptions
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.barcode.common.Barcode
 import com.levf.qrheapscanner.databinding.ActivityCameraBinding
 import kotlinx.coroutines.launch
 import java.lang.Exception
@@ -40,18 +37,6 @@ class Camera : AppCompatActivity() {
         viewBinding = ActivityCameraBinding.inflate(layoutInflater)
         bboxOverlay = viewBinding.previewView.overlay
         setContentView(viewBinding.root)
-
-        viewBinding.cameraButton.setOnClickListener {
-            bboxOverlay.add(ShapeDrawable().apply {
-                paint.color = Color.GREEN
-                bounds = Rect().apply {
-                    top = 20
-                    left = 10
-                    bottom = 30
-                    right = 40
-                }
-            })
-        }
 
         if (!hasPermissions()) {
             permissionsActivityLauncher.launch(REQUIRED_PERMISSIONS)
@@ -86,35 +71,23 @@ class Camera : AppCompatActivity() {
         }
 
     private fun createAnalyzer(): ImageAnalysis.Analyzer {
-        val options = BarcodeScannerOptions.Builder()
-            .setBarcodeFormats(Barcode.FORMAT_ALL_FORMATS)
-            .build()
-
-        val barcodeScanner = BarcodeScanning.getClient(options)
-        val executor = ContextCompat.getMainExecutor(this)
-        return MlKitAnalyzer(
-            listOf(barcodeScanner),
-            COORDINATE_SYSTEM_ORIGINAL,
-            executor
-        ) { result: MlKitAnalyzer.Result? ->
-            Log.i(TAG, "Some detected event")
-            if (result == null)
-                return@MlKitAnalyzer
+        return Analyzer {
             lifecycleScope.launch {
                 bboxOverlay.clear()
-                result.getValue(barcodeScanner)?.forEach { barcode: Barcode ->
-                    barcode.boundingBox?.also { rect ->
-                        bboxOverlay.add(ShapeDrawable().apply {
-                            paint.color = Color.RED
-                            paint.style = Paint.Style.FILL
-                            alpha = 100
-                            bounds = rect
-                        })
-                    }
+                it.forEach {point ->
+                    bboxOverlay.add(ShapeDrawable().apply {
+                        paint.color = Color.RED
+                        paint.style = Paint.Style.FILL
+                        alpha = 100
+                        val rect = Rect().apply {
+
+                        }
+                        bounds = Rect(point.x, point.y, point.x + 20, point.y + 20)
+                    })
                 }
             }
-        }
 
+        }
     }
 
     private suspend fun startCamera() {
@@ -124,9 +97,8 @@ class Camera : AppCompatActivity() {
 
         val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
         val imageAnalysis = ImageAnalysis.Builder()
-            .setTargetResolution(
-                Size(viewBinding.previewView.width, viewBinding.previewView.height)
-            )
+            .setOutputImageFormat(OUTPUT_IMAGE_FORMAT_YUV_420_888)
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .build()
             .apply {
                 setAnalyzer(
