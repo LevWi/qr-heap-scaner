@@ -4,17 +4,16 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
+import android.graphics.Matrix
 import android.graphics.drawable.ShapeDrawable
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.util.Log
-import android.util.Size
 import android.view.ViewOverlay
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageAnalysis.COORDINATE_SYSTEM_ORIGINAL
 import androidx.camera.core.ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -32,10 +31,13 @@ class Camera : AppCompatActivity() {
     private lateinit var viewBinding: ActivityCameraBinding
     private lateinit var bboxOverlay: ViewOverlay
 
+    private var correctionMatrix: Matrix? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         viewBinding = ActivityCameraBinding.inflate(layoutInflater)
         bboxOverlay = viewBinding.previewView.overlay
+        //viewBinding.previewView.scaleType = PreviewView.ScaleType.FIT_CENTER //TODO
         setContentView(viewBinding.root)
 
         if (!hasPermissions()) {
@@ -71,18 +73,30 @@ class Camera : AppCompatActivity() {
         }
 
     private fun createAnalyzer(): ImageAnalysis.Analyzer {
-        return Analyzer {
+        return Analyzer { result ->
             lifecycleScope.launch {
                 bboxOverlay.clear()
-                it.forEach {point ->
+                if (correctionMatrix == null)
+                {
+                    correctionMatrix = matrixForFitPreview(result.imageProxy, viewBinding.previewView)
+                    Log.d(
+                        Analyzer.TAG,
+                        "correctionMatrix: $correctionMatrix"
+                    )
+                }
+                result.points?.forEach { point ->
                     bboxOverlay.add(ShapeDrawable().apply {
                         paint.color = Color.RED
                         paint.style = Paint.Style.FILL
-                        alpha = 100
-                        val rect = Rect().apply {
-
+                        //alpha = 100
+                        bounds = Rect().apply {
+                            val arr = floatArrayOf(point.x, point.y)
+                            correctionMatrix!!.mapPoints(arr)
+                            this.left = arr[0].toInt()
+                            this.top = arr[1].toInt()
+                            this.right = arr[0].toInt() + 20
+                            this.bottom = arr[1].toInt() + 20
                         }
-                        bounds = Rect(point.x, point.y, point.x + 20, point.y + 20)
                     })
                 }
             }
@@ -94,6 +108,11 @@ class Camera : AppCompatActivity() {
         val cameraProvider = ProcessCameraProvider.getInstance(this).await()
         val preview = Preview.Builder().build()
         preview.setSurfaceProvider(viewBinding.previewView.surfaceProvider)
+
+        Log.d(
+            Analyzer.TAG,
+            "previewView: ${viewBinding.previewView.width} * ${viewBinding.previewView.height}"
+        )
 
         val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
         val imageAnalysis = ImageAnalysis.Builder()
@@ -107,11 +126,24 @@ class Camera : AppCompatActivity() {
                 )
             }
 
+//        val useCaseGroup = UseCaseGroup.Builder()
+//            .addUseCase(preview)
+//            .addUseCase(imageAnalysis)
+//            .apply {
+//                val viewPort = viewBinding.previewView.viewPort
+//                if (viewPort != null) {
+//                    Log.d(Analyzer.TAG, "UseCaseGroup.Builder().setViewPort")
+//                    setViewPort(viewPort)
+//                }
+//            }
+//            .build()
+
         try {
             cameraProvider.unbindAll()
             cameraProvider.bindToLifecycle(
                 this,
                 cameraSelector,
+                // useCaseGroup
                 imageAnalysis,
                 preview
             )

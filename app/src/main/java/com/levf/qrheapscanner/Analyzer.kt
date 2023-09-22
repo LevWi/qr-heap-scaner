@@ -1,7 +1,7 @@
 package com.levf.qrheapscanner
 
 import android.graphics.ImageFormat.YUV_420_888
-import android.graphics.Point
+import android.graphics.PointF
 
 import android.util.Log
 import androidx.camera.core.ImageAnalysis
@@ -13,7 +13,13 @@ import com.google.zxing.MultiFormatReader
 import com.google.zxing.PlanarYUVLuminanceSource
 import com.google.zxing.common.HybridBinarizer
 
-class Analyzer(val callback: (Array<Point>) -> Unit ) : ImageAnalysis.Analyzer { //todo register callback for result
+class Result(
+    val points: Array<PointF>?,
+    val text: String,
+    val imageProxy: ImageProxy
+)
+
+class Analyzer(val callback: (Result) -> Unit ) : ImageAnalysis.Analyzer { //todo register callback for result
     private val reader = MultiFormatReader()
     private var buffer: ByteArray = ByteArray(0)
 //    private val hints = mapOf(
@@ -24,20 +30,20 @@ class Analyzer(val callback: (Array<Point>) -> Unit ) : ImageAnalysis.Analyzer {
 
     override fun analyze(image: ImageProxy) {
         try {
-            Log.d(TAG, "Analyzer.analyze()...") //TODO remove
+            Log.d(TAG, "Analyzer.analyze() CropRect ${image.cropRect}")
             val lumSource = toLuminanceSource(image)
             val binarizer = HybridBinarizer(lumSource)
             val bitmap = BinaryBitmap(binarizer)
             val result = reader.decode(bitmap)
-            Log.d(TAG, "Analyzer.analyze() result: ${result.text}") //TODO remove
+            Log.v(TAG, "Analyzer.analyze() result: ${result.text}")
             if(result.resultPoints.isNotEmpty())
             {
-                callback( result.resultPoints.map {
-                    return@map Point(it.x.toInt(), it.y.toInt())
-                }.toTypedArray())
+                callback( Result(result.resultPoints.map {
+                    return@map PointF(it.x, it.y)
+                }.toTypedArray(), result.text, image) )
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Analyzer.analyze() error:", e)
+            Log.d(TAG, "Analyzer.analyze() error:", e)
         } finally {
             image.close()
         }
@@ -45,15 +51,18 @@ class Analyzer(val callback: (Array<Point>) -> Unit ) : ImageAnalysis.Analyzer {
 
     private fun toLuminanceSource(imageProxy: ImageProxy): PlanarYUVLuminanceSource {
         assert(imageProxy.format == YUV_420_888)
-        assert(imageProxy.planes.size == 3)
-        assert(imageProxy.planes[2].buffer.position() == 0)
+        Log.d(TAG, "toLuminanceSource: ${imageProxy.width} * ${imageProxy.height}")
 
         val yPlane = imageProxy.planes[0] //lets check only Y plane
-        val requiredCapacity = yPlane.buffer.remaining()
-        if (buffer.size < requiredCapacity) {
-            buffer = ByteArray(requiredCapacity)
+        assert(yPlane.pixelStride == 1)
+        val bufferSize = yPlane.buffer.remaining()
+        if (buffer.size < bufferSize) {
+            buffer = ByteArray(bufferSize)
         }
-        yPlane.buffer.get(buffer, 0, yPlane.buffer.remaining())
+
+
+        yPlane.buffer.get(buffer, 0, bufferSize)
+
 //        val rowStride = yPlane.rowStride
 //        for(x : Int in 0..imageProxy.height)
 //        {
@@ -66,7 +75,7 @@ class Analyzer(val callback: (Array<Point>) -> Unit ) : ImageAnalysis.Analyzer {
         val reverseHorizontal = false
         return PlanarYUVLuminanceSource(
             buffer,
-            imageProxy.width,
+            if (imageProxy.width * imageProxy.height < bufferSize) yPlane.rowStride else imageProxy.width,
             imageProxy.height,
             0,
             0,
@@ -77,6 +86,6 @@ class Analyzer(val callback: (Array<Point>) -> Unit ) : ImageAnalysis.Analyzer {
     }
 
     companion object {
-        val TAG = "Analyzer"
+        const val TAG = "Analyzer"
     }
 }
